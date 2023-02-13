@@ -43,29 +43,40 @@ def data_split(X,y,nan_mask,indices):
 def data_prep_openml(ds_id, seed, task, datasplit=[.65, .15, .2]):
     
     np.random.seed(seed) 
-    dataset = openml.datasets.get_dataset(ds_id)
     
-    X, y, categorical_indicator, attribute_names = dataset.get_data(dataset_format="dataframe", target=dataset.default_target_attribute)
-    if ds_id == 42178:
-        categorical_indicator = [True, False, True,True,False,True,True,True,True,True,True,True,True,True,True,True,True,False, False]
-        tmp = [x if (x != ' ') else '0' for x in X['TotalCharges'].tolist()]
-        X['TotalCharges'] = [float(i) for i in tmp ]
-        y = y[X.TotalCharges != 0]
-        X = X[X.TotalCharges != 0]
-        X.reset_index(drop=True, inplace=True)
-        print(y.shape, X.shape)
-    if ds_id in [42728,42705,42729,42571]:
-        # import ipdb; ipdb.set_trace()
-        X, y = X[:50000], y[:50000]
-        X.reset_index(drop=True, inplace=True)
-    categorical_columns = X.columns[list(np.where(np.array(categorical_indicator)==True)[0])].tolist()
-    cont_columns = list(set(X.columns.tolist()) - set(categorical_columns))
-
-    cat_idxs = list(np.where(np.array(categorical_indicator)==True)[0])
+    df = pd.read_csv('DNN-EdgeIIoT-dataset.csv', low_memory=False)
+    drop_columns = ["frame.time", "ip.src_host", "ip.dst_host", "arp.src.proto_ipv4","arp.dst.proto_ipv4", 
+                    "http.file_data","http.request.full_uri","icmp.transmit_timestamp",
+                    "http.request.uri.query", "tcp.options","tcp.payload","tcp.srcport",
+                    "tcp.dstport", "udp.port", "mqtt.msg"]
+    df.drop(drop_columns, axis=1, inplace=True)
+    df = df.dropna(axis=0, how='any', inplace=False)
+    df = df.drop_duplicates(subset=None, keep="first", inplace=False, ignore_index=True)
+    
+    #for binary class
+    y = df.iloc[:,46]
+    #for multiclass 
+    y_b = df.iloc[:,47]
+    df.pop("Attack_type")
+    df.pop("Attack_label")
+    X = df#.tail(-1)
+    
+    attribute_names = [ col for col in df.columns if col not in ["Attack_label"]+["Attack_type"]]
+    
+    categorical_columns = []
+    categorical_dims =  {}
+    for col in df.columns[df.dtypes == object]:
+        l_enc = LabelEncoder()
+        df[col] = l_enc.fit_transform(df[col].values)
+        categorical_columns.append(col)
+        categorical_dims[col] = len(l_enc.classes_)
+    
+    cat_idxs = [ i for i, f in enumerate(attribute_names) if f in categorical_columns]
+    cat_dims = [ categorical_dims[f] for i, f in enumerate(attribute_names) if f in categorical_columns]
+    
     con_idxs = list(set(range(len(X.columns))) - set(cat_idxs))
 
-    for col in categorical_columns:
-        X[col] = X[col].astype("object")
+    cont_columns = list(set(X.columns.tolist()) - set(categorical_columns))
 
     X["Set"] = np.random.choice(["train", "valid", "test"], p = datasplit, size=(X.shape[0],))
 
@@ -91,6 +102,7 @@ def data_prep_openml(ds_id, seed, task, datasplit=[.65, .15, .2]):
     if task != 'regression':
         l_enc = LabelEncoder() 
         y = l_enc.fit_transform(y)
+    
     X_train, y_train = data_split(X,y,nan_mask,train_indices)
     X_valid, y_valid = data_split(X,y,nan_mask,valid_indices)
     X_test, y_test = data_split(X,y,nan_mask,test_indices)
